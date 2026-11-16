@@ -1,0 +1,38 @@
+name: Refresh analytics snapshot
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch snapshot
+        env:
+          TOKEN: ${{ secrets.POSE_ANALYTICS_ADMIN_TOKEN }}
+        run: |
+          FROM=$(date -u -d "30 days ago" +%F)
+          TO=$(date -u +%F)
+          curl -fsS "https://analytics.movewithpose.com/api/snapshot?from=$FROM&to=$TO" \
+            -H "x-admin-token: $TOKEN" -o analytics/data.json
+          python3 - <<'PY'
+          import json
+          d = json.load(open("analytics/data.json"))
+          print("range", d.get("range"))
+          print("installs", d["overview"]["installs"], "events", d["overview"]["events"])
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "pose-analytics-bot"
+          git config user.email "analytics@movewithpose.com"
+          git add analytics/data.json
+          git diff --cached --quiet || git commit -m "chore: refresh analytics snapshot"
+          git push

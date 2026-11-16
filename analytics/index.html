@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>pose · analytics</title>
+<style>
+:root{--cream:#f6f1e7;--ink:#1e1e1c;--muted:#7a756b;--green:#3d5c43;--pale:#e9efdd;--line:#ded7c9;--white:#fffdf8;--red:#a4472f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--cream);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+header{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:14px 22px;background:var(--white);border-bottom:1px solid var(--line)}
+.brand{font-size:20px;font-weight:700}.brand span{margin-left:6px;color:var(--green);font-weight:500;font-size:14px}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{border:0;background:transparent;color:var(--muted);padding:7px 12px;border-radius:999px;cursor:pointer;font-size:13px}
+nav button.active{background:var(--pale);color:var(--ink);font-weight:600}
+.meta{margin-left:auto;color:var(--muted);font-size:11px;text-align:right}
+main{padding:22px;max-width:1180px;margin:0 auto}
+.panel{display:flex;flex-direction:column;gap:18px}
+.card{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+.card h2{margin:0 0 14px;font-size:15px;font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{background:var(--white);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.kpi .label{color:var(--muted);font-size:12px}.kpi .value{font-size:26px;font-weight:650;letter-spacing:-.5px;margin-top:4px}.kpi .hint{color:var(--muted);font-size:11px;margin-top:2px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--muted);font-weight:500;font-size:12px}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:820px){.two{grid-template-columns:1fr}}
+.muted{color:var(--muted)}
+.bar{height:8px;background:var(--pale);border-radius:99px;min-width:60px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--green)}
+.drop{color:var(--red)}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">pose<span>analytics</span></div>
+  <nav id="tabs">
+    <button data-tab="overview" class="active">总览漏斗</button>
+    <button data-tab="onboarding">引导</button>
+    <button data-tab="paywall">付费墙</button>
+    <button data-tab="revenue">收入</button>
+    <button data-tab="ads">投放</button>
+    <button data-tab="quality">数据质量</button>
+  </nav>
+  <div class="meta" id="meta">加载中…</div>
+</header>
+<main>
+  <section class="panel" id="panel-overview">
+    <div class="kpis" id="overview-kpis"></div>
+    <div class="card"><h2>安装 → 支付漏斗</h2><table id="funnel-table"></table></div>
+  </section>
+  <section class="panel hidden" id="panel-onboarding">
+    <div class="card"><h2>引导逐步折损</h2><table id="onboarding-table"></table></div>
+    <div class="card"><h2>答案分布</h2><div id="answers" class="two"></div></div>
+  </section>
+  <section class="panel hidden" id="panel-paywall">
+    <div class="kpis" id="paywall-kpis"></div>
+    <div class="card"><h2>按入口来源</h2><table id="paywall-source"></table></div>
+    <div class="two">
+      <div class="card"><h2>关闭原因</h2><table id="paywall-close"></table></div>
+      <div class="card"><h2>支付结果</h2><table id="paywall-result"></table></div>
+    </div>
+    <div class="card"><h2>套餐选择</h2><table id="paywall-plan"></table></div>
+  </section>
+  <section class="panel hidden" id="panel-revenue">
+    <div class="kpis" id="revenue-kpis"></div>
+    <div class="two">
+      <div class="card"><h2>事件类型</h2><table id="revenue-types"></table></div>
+      <div class="card"><h2>订阅状态</h2><table id="revenue-status"></table></div>
+    </div>
+    <div class="card"><h2>最近事件</h2><table id="revenue-recent"></table></div>
+  </section>
+  <section class="panel hidden" id="panel-ads">
+    <div class="kpis" id="ads-kpis"></div>
+    <div class="two">
+      <div class="card"><h2>按广告系列</h2><table id="ads-campaign"></table></div>
+      <div class="card"><h2>按关键词</h2><table id="ads-keyword"></table></div>
+    </div>
+  </section>
+  <section class="panel hidden" id="panel-quality">
+    <div class="card"><h2>每日事件量与下载</h2><table id="quality-daily"></table></div>
+    <div class="two">
+      <div class="card"><h2>版本分布</h2><table id="quality-versions"></table></div>
+      <div class="card"><h2>事件量 Top</h2><table id="quality-events"></table></div>
+    </div>
+  </section>
+</main>
+<script>
+const STAGES = [
+  ["app_open","首次打开"],["consent_view","同意页浏览"],["consent_accept","同意并继续"],
+  ["welcome","欢迎页"],["demo","Demo 页"],["q_goal","1 目标"],["q_experience","2 经验"],
+  ["q_focus","3 重点"],["q_equipment","4 器械"],["q_duration","5 时长"],["q_weekly","6 频率"],
+  ["q_height","7 身高"],["q_weight","8 体重"],["q_target_weight","9 目标体重"],
+  ["q_comfort","10 舒适度"],["q_barrier","11 障碍"],["q_name_date","12 名字/日期"],
+  ["generating","生成中"],["plan","方案页"],["plan_confirmed","滑条确认"],
+  ["paywall_open","付费墙打开"],["purchase_click","点击支付"],["purchase_success","支付成功"],
+  ["onboarding_complete","完成引导"],["today","进入首页"],["course_detail","课程详情"],
+  ["practice_start","开始练习"],["practice_complete","完成练习"]
+];
+const fmt = v => (v===null||v===undefined)?"—":Number(v).toLocaleString("en-US");
+const pct = v => isFinite(v)?(v*100).toFixed(1)+"%":"—";
+const $ = id => document.getElementById(id);
+
+function kpi(label,value,hint){return `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${hint||""}</div></div>`}
+function table(node,headers,rows){
+  const head = headers.map(h=>`<th class="${h.num?"num":""}">${h.label}</th>`).join("");
+  const body = rows.length ? rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${typeof c==="number"?"num":""}">${typeof c==="number"?fmt(c):(c??"—")}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${headers.length}" class="muted">暂无数据</td></tr>`;
+  node.innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
+}
+
+let DATA = null;
+
+function renderOverview(){
+  const d = DATA.overview, map = new Map(d.funnel.map(r=>[r.stage,r.users]));
+  const installs = d.installs||0, opens = map.get("app_open")||0, consent = map.get("consent_accept")||0;
+  const complete = map.get("onboarding_complete")||0;
+  const paywallOpened = (d.paywall&&d.paywall.opened)||map.get("paywall_open")||0;
+  const clicked = (d.paywall&&d.paywall.clicked)||map.get("purchase_click")||0;
+  const success = (d.paywall&&d.paywall.succeeded)||map.get("purchase_success")||0;
+  $("overview-kpis").innerHTML =
+    kpi("安装",fmt(installs),"ASC 去重")+
+    kpi("首次打开",fmt(opens),installs?`打开率 ${pct(opens/installs)}`:"")+
+    kpi("同意协议",fmt(consent),opens?`${pct(consent/opens)} of 打开`:"")+
+    kpi("完成引导",fmt(complete),consent?`${pct(complete/consent)} of 同意`:"")+
+    kpi("付费墙打开",fmt(paywallOpened),complete?`${pct(paywallOpened/complete)} of 完成`:"")+
+    kpi("支付成功",fmt(success),clicked?`${pct(success/clicked)} of 点击`:"");
+  const rows=[]; let prev=installs;
+  rows.push(["App Store 安装",installs,"—","100.0%","—"]);
+  let last=0; STAGES.forEach((s,i)=>{ if((map.get(s[0])||0)>0) last=i; });
+  STAGES.forEach((s,i)=>{
+    if(i>last+1) return;
+    const users=map.get(s[0])||0, step=prev>0?users/prev:0, cum=installs>0?users/installs:0;
+    rows.push([s[1],users,step?pct(step):"—",pct(cum),(prev-users)>0?`−${fmt(prev-users)}`:"—"]);
+    prev=users;
+  });
+  table($("funnel-table"),[{label:"步骤"},{label:"人数",num:true},{label:"步转化",num:true},{label:"累计",num:true},{label:"流失",num:true}],rows);
+}
+
+function renderOnboarding(){
+  const d = DATA.onboarding;
+  const rows = d.steps.map((s,i)=>{
+    const prev = i===0?s.viewed:(d.steps[i-1].viewed||0);
+    return [s.step,s.viewed,s.completed,s.skipped,s.back,s.dwell?Math.round(s.dwell/1000)+"s":"—",prev?pct(s.viewed/prev):"—"];
+  });
+  table($("onboarding-table"),[{label:"步骤"},{label:"到达",num:true},{label:"完成",num:true},{label:"Skip",num:true},{label:"返回",num:true},{label:"平均停留",num:true},{label:"步转化",num:true}],rows);
+  const groups = new Map();
+  for(const a of d.answers||[]){ if(!groups.has(a.step)) groups.set(a.step,[]); groups.get(a.step).push(a); }
+  $("answers").innerHTML = [...groups].slice(0,8).map(([step,items])=>
+    `<div><b>${step}</b>${items.slice(0,6).map(x=>`<div class="muted" style="display:flex;justify-content:space-between"><span>${String(x.answer).slice(0,32)}</span><b>${x.n}</b></div>`).join("")}</div>`
+  ).join("") || `<p class="muted">暂无答案数据</p>`;
+}
+
+function renderPaywall(){
+  const d = DATA.paywall, t = d.totals||{};
+  $("paywall-kpis").innerHTML =
+    kpi("打开",fmt(t.opened||0),"paywall_open")+
+    kpi("关闭",fmt(t.closed||0),t.opened?`关闭率 ${pct(t.closed/t.opened)}`:"")+
+    kpi("点击支付",fmt(t.clicked||0),t.opened?`点击率 ${pct(t.clicked/t.opened)}`:"")+
+    kpi("成功",fmt(t.succeeded||0),t.clicked?`完成率 ${pct(t.succeeded/t.clicked)}`:"")+
+    kpi("取消支付",fmt(t.cancelled||0),t.clicked?`${pct(t.cancelled/t.clicked)} of 点击`:"")+
+    kpi("端到端",t.opened?pct(t.succeeded/t.opened):"—","成功 / 打开");
+  const group = (node,items)=>table(node,[{label:"分组"},{label:"打开",num:true},{label:"关闭",num:true},{label:"点击",num:true},{label:"成功",num:true},{label:"转化",num:true}],
+    (items||[]).map(r=>[r.k,r.opened,r.closed,r.clicked,r.succeeded,r.opened?pct(r.succeeded/r.opened):"—"]));
+  group($("paywall-source"),d.bySource);
+  group($("paywall-close"),d.byCloseReason);
+  group($("paywall-result"),d.byResult);
+  group($("paywall-plan"),d.byPlan);
+}
+
+function renderRevenue(){
+  const d = DATA.revenue||{}, st = new Map((d.statuses||[]).map(r=>[r.status,r.n]));
+  const sum = ty => ((d.totals||[]).find(x=>x.type===ty)||{}).n||0;
+  $("revenue-kpis").innerHTML =
+    kpi("活跃订阅",fmt((st.get("active")||0)+(st.get("trial")||0)),"RC 当前状态")+
+    kpi("试用中",fmt(st.get("trial")||0),"")+
+    kpi("已过期",fmt(st.get("expired")||0),"")+
+    kpi("退款",fmt(st.get("refunded")||0),"")+
+    kpi("首次购买",fmt(sum("INITIAL_PURCHASE")),"")+
+    kpi("续订",fmt(sum("RENEWAL")),"");
+  table($("revenue-types"),[{label:"类型"},{label:"次数",num:true}],(d.totals||[]).map(r=>[r.type,r.n]));
+  table($("revenue-status"),[{label:"状态"},{label:"人数",num:true}],(d.statuses||[]).map(r=>[r.status,r.n]));
+  table($("revenue-recent"),[{label:"时间"},{label:"类型"},{label:"产品"},{label:"周期"},{label:"环境"}],
+    (d.recent||[]).slice(0,30).map(r=>[String(r.time).replace("T"," ").slice(0,19),r.type,r.product_id||"—",r.period_type||"—",r.environment||"—"]));
+}
+
+function renderAds(){
+  const d = DATA.ads||{}, t = d.totals||{};
+  $("ads-kpis").innerHTML =
+    kpi("花费",t.spend?t.spend.toFixed(2):"0","Apple Ads")+
+    kpi("安装",fmt(t.installs||0),"")+
+    kpi("CPA",t.installs?(t.spend/t.installs).toFixed(2):"—","花费 / 安装")+
+    kpi("点击",fmt(t.taps||0),"")+
+    kpi("点击→安装",t.taps?pct(t.installs/t.taps):"—","");
+  const rows = items => (items||[]).map(r=>[r.campaign||r.keyword||"—",r.spend?r.spend.toFixed(2):"0",r.installs,r.installs?(r.spend/r.installs).toFixed(2):"—"]);
+  table($("ads-campaign"),[{label:"广告系列"},{label:"花费",num:true},{label:"安装",num:true},{label:"CPA",num:true}],rows(d.byCampaign));
+  table($("ads-keyword"),[{label:"关键词"},{label:"花费",num:true},{label:"安装",num:true},{label:"CPA",num:true}],rows(d.byKeyword));
+}
+
+function renderQuality(){
+  const d = DATA.quality||{};
+  const asc = new Map((d.asc||[]).map(r=>[r.day,r.downloads]));
+  const opens = new Map((d.opens||[]).map(r=>[r.day,r.n]));
+  table($("quality-daily"),[{label:"日期"},{label:"事件",num:true},{label:"人数",num:true},{label:"下载",num:true},{label:"打开",num:true},{label:"打开/下载",num:true}],
+    (d.daily||[]).map(r=>{
+      const down=asc.get(r.day)||0, open=opens.get(r.day)||0;
+      return [r.day,r.events,r.users,down||"—",open||"—",down&&open?pct(open/down):"—"];
+    }));
+  table($("quality-versions"),[{label:"版本"},{label:"人数",num:true}],(d.versions||[]).map(r=>[r.k,r.n]));
+  table($("quality-events"),[{label:"事件"},{label:"次数",num:true}],(d.topEvents||[]).map(r=>[r.k,r.n]));
+}
+
+function show(tab){
+  for(const b of document.querySelectorAll("#tabs button")) b.classList.toggle("active",b.dataset.tab===tab);
+  for(const p of document.querySelectorAll(".panel")) p.classList.toggle("hidden",p.id!=="panel-"+tab);
+  if(tab==="overview") renderOverview();
+  if(tab==="onboarding") renderOnboarding();
+  if(tab==="paywall") renderPaywall();
+  if(tab==="revenue") renderRevenue();
+  if(tab==="ads") renderAds();
+  if(tab==="quality") renderQuality();
+}
+
+async function boot(){
+  try{
+    const response = await fetch("./data.json?t="+Date.now(),{cache:"no-store"});
+    DATA = await response.json();
+    const r = DATA.range||{};
+    $("meta").innerHTML = `${r.from||""} ~ ${r.to||""}<br>数据更新：${String(DATA.generated_at||"").replace("T"," ").slice(0,16)} UTC`;
+    show("overview");
+  }catch(e){
+    $("meta").textContent = "数据还没生成，请等 GitHub Action 跑完";
+  }
+}
+
+document.getElementById("tabs").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-tab]"); if(b) show(b.dataset.tab);
+});
+boot();
+</script>
+</body>
+</html>
