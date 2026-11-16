@@ -71,16 +71,16 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
     <div class="card"><h2>套餐选择</h2><table id="paywall-plan"></table></div>
   </section>
   <section class="panel hidden" id="panel-revenue">
-    <div class="env-switch" id="env-switch">
-      <button data-env="PRODUCTION" class="active">生产环境</button>
-      <button data-env="SANDBOX">沙盒</button>
-    </div>
     <div class="kpis" id="revenue-kpis"></div>
+    <div class="card"><h2>订单明细（App Store 生产环境）</h2><table id="orders-table"></table></div>
     <div class="two">
-      <div class="card"><h2>事件类型</h2><table id="revenue-types"></table></div>
+      <div class="card"><h2>收入按天</h2><table id="orders-daily"></table></div>
       <div class="card"><h2>订阅状态</h2><table id="revenue-status"></table></div>
     </div>
-    <div class="card"><h2>最近事件</h2><table id="revenue-recent"></table></div>
+    <div class="two">
+      <div class="card"><h2>RevenueCat 事件类型</h2><table id="revenue-types"></table></div>
+      <div class="card"><h2>最近购买事件</h2><table id="revenue-recent"></table></div>
+    </div>
   </section>
   <section class="panel hidden" id="panel-ads">
     <div class="kpis" id="ads-kpis"></div>
@@ -180,27 +180,39 @@ function renderPaywall(){
   group($("paywall-plan"),d.byPlan);
 }
 
-let REVENUE_ENV = "PRODUCTION";
-
 function renderRevenue(){
-  const root = DATA.revenue||{};
-  const d = root[REVENUE_ENV==="SANDBOX"?"sandbox":"production"]||{};
+  const d = DATA.revenue||{};
+  const o = DATA.orders||{};
+  const ot = o.totals||{};
   const st = new Map((d.statuses||[]).map(r=>[r.status,r.n]));
   const sum = ty => ((d.totals||[]).find(x=>x.type===ty)||{}).n||0;
-  const amount = d.amount||0;
+  const units = ot.units||0, revenue = ot.revenue||0;
+
   $("revenue-kpis").innerHTML =
-    kpi("本期购买",fmt(d.purchases||0), d.amount ? `收入 ${d.amount.toFixed(2)}` : "金额以 RevenueCat 为准")+
+    kpi("订单数",fmt(units),"App Store 生产")+
+    kpi("收入",revenue?revenue.toFixed(2):"0","按商店币种求和")+
+    kpi("客单价",units?(revenue/units).toFixed(2):"—","收入 / 订单")+
+    kpi("RC 购买",fmt(d.purchases||0),"RevenueCat 事件")+
     kpi("活跃订阅",fmt((st.get("active")||0)+(st.get("trial")||0)),"当前状态")+
-    kpi("试用中",fmt(st.get("trial")||0),"")+
-    kpi("已过期",fmt(st.get("expired")||0),"")+
-    kpi("退款",fmt(st.get("refunded")||0),"")+
-    kpi("首次购买",fmt(sum("INITIAL_PURCHASE")),"")+
-    kpi("续订",fmt(sum("RENEWAL")),"");
+    kpi("退款",fmt(st.get("refunded")||0),"");
+
+  table($("orders-table"),
+    [{label:"日期"},{label:"产品"},{label:"国家"},{label:"数量",num:true},{label:"单价",num:true},{label:"小计",num:true},{label:"币种"}],
+    (o.rows||[]).map(r=>[r.day,r.product,r.country,r.units,
+      r.customer_price?r.customer_price.toFixed(2):"—",
+      r.customer_price?(r.customer_price*r.units).toFixed(2):"—",
+      r.currency||"—"]));
+
+  table($("orders-daily"),[{label:"日期"},{label:"订单",num:true},{label:"收入",num:true}],
+    (o.daily||[]).map(r=>[r.day,r.units,r.revenue?r.revenue.toFixed(2):"—"]));
+
+  table($("revenue-status"),[{label:"状态"},{label:"人数",num:true}],(d.statuses||[]).map(r=>[r.status,r.n]));
+
   table($("revenue-types"),[{label:"类型"},{label:"次数",num:true},{label:"金额",num:true}],
     (d.totals||[]).map(r=>[r.type,r.n,r.amount?r.amount.toFixed(2):"—"]));
-  table($("revenue-status"),[{label:"状态"},{label:"人数",num:true}],(d.statuses||[]).map(r=>[r.status,r.n]));
-  table($("revenue-recent"),[{label:"时间"},{label:"类型"},{label:"产品"},{label:"周期"},{label:"价格"},{label:"环境"}],
-    (d.recent||[]).slice(0,30).map(r=>[String(r.time).replace("T"," ").slice(0,19),r.type,r.product_id||"—",r.period_type||"—",r.price?`${r.price} ${r.currency||""}`:"—",r.environment||"—"]));
+
+  table($("revenue-recent"),[{label:"时间"},{label:"类型"},{label:"产品"},{label:"周期"},{label:"价格"}],
+    (d.recent||[]).slice(0,20).map(r=>[String(r.time).replace("T"," ").slice(0,19),r.type,r.product_id||"—",r.period_type||"—",r.price?`${r.price} ${r.currency||""}`:"—"]));
 }
 
 function renderAds(){
@@ -254,12 +266,6 @@ async function boot(){
 
 document.getElementById("tabs").addEventListener("click",e=>{
   const b=e.target.closest("button[data-tab]"); if(b) show(b.dataset.tab);
-});
-document.getElementById("env-switch").addEventListener("click",e=>{
-  const b=e.target.closest("button[data-env]"); if(!b) return;
-  REVENUE_ENV=b.dataset.env;
-  for(const x of document.querySelectorAll("#env-switch button")) x.classList.toggle("active",x===b);
-  renderRevenue();
 });
 boot();
 </script>
