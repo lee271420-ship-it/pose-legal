@@ -242,6 +242,7 @@ function renderQuality(){
 }
 
 function show(tab){
+  if(!DATA) return;
   for(const b of document.querySelectorAll("#tabs button")) b.classList.toggle("active",b.dataset.tab===tab);
   for(const p of document.querySelectorAll(".panel")) p.classList.toggle("hidden",p.id!=="panel-"+tab);
   if(tab==="overview") renderOverview();
