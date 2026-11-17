@@ -55,7 +55,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 <main>
   <section class="panel" id="panel-overview">
     <div class="kpis" id="overview-kpis"></div>
-    <div class="card"><h2>安装 → 支付漏斗</h2><table id="funnel-table"></table></div>
+    <div class="card"><h2>安装 → 支付漏斗</h2><p class="muted" id="funnel-note" style="margin:-8px 0 12px;font-size:11px"></p><table id="funnel-table"></table></div>
+    <div class="card"><h2>每日数据</h2><table id="daily-table"></table></div>
   </section>
   <section class="panel hidden" id="panel-onboarding">
     <div class="card"><h2>引导逐步折损</h2><table id="onboarding-table"></table></div>
@@ -127,15 +128,16 @@ function renderOverview(){
   const d = DATA.overview, map = new Map(d.funnel.map(r=>[r.stage,r.users]));
   const installs = d.installs||0, opens = map.get("app_open")||0, consent = map.get("consent_accept")||0;
   const complete = map.get("onboarding_complete")||0;
-  const paywallOpened = (d.paywall&&d.paywall.opened)||map.get("paywall_open")||0;
-  const clicked = (d.paywall&&d.paywall.clicked)||map.get("purchase_click")||0;
-  const success = (d.paywall&&d.paywall.succeeded)||map.get("purchase_success")||0;
+  const paywallUsers = map.get("paywall_open")||0;
+  const paywallSessions = (d.paywall&&d.paywall.opened)||0;
+  const clicked = map.get("purchase_click")||0;
+  const success = map.get("purchase_success")||0;
   $("overview-kpis").innerHTML =
     kpi("安装",fmt(installs),"ASC 去重")+
     kpi("首次打开",fmt(opens),installs?`打开率 ${pct(opens/installs)}`:"")+
     kpi("同意协议",fmt(consent),opens?`${pct(consent/opens)} of 打开`:"")+
     kpi("完成引导",fmt(complete),consent?`${pct(complete/consent)} of 同意`:"")+
-    kpi("付费墙打开",fmt(paywallOpened),complete?`${pct(paywallOpened/complete)} of 完成`:"")+
+    kpi("付费墙打开",fmt(paywallUsers),`人数 · 人次 ${fmt(paywallSessions)}`)+
     kpi("支付成功",fmt(success),clicked?`${pct(success/clicked)} of 点击`:"");
   const rows=[]; let prev=installs;
   rows.push(["App Store 安装",installs,"—","100.0%","—"]);
@@ -147,6 +149,30 @@ function renderOverview(){
     prev=users;
   });
   table($("funnel-table"),[{label:"步骤"},{label:"人数",num:true},{label:"步转化",num:true},{label:"累计",num:true},{label:"流失",num:true}],rows);
+
+  const dayMap = new Map();
+  const row = (day) => {
+    if (!dayMap.has(day)) dayMap.set(day, { open:0, consent:0, complete:0, paywall:0, success:0, sessions:0, orders:0 });
+    return dayMap.get(day);
+  };
+  for (const r of (DATA.daily&&DATA.daily.funnel)||[]) {
+    const e = row(r.day);
+    if (r.milestone==="app_open") e.open = r.users;
+    if (r.milestone==="consent_accept") e.consent = r.users;
+    if (r.milestone==="onboarding_complete") e.complete = r.users;
+    if (r.milestone==="paywall_open") e.paywall = r.users;
+    if (r.milestone==="purchase_success") e.success = r.users;
+  }
+  for (const r of (DATA.daily&&DATA.daily.paywall)||[]) {
+    const e = row(r.day);
+    e.sessions = r.opened;
+  }
+  const dailyRows = [...dayMap.entries()].sort((a,b)=>b[0].localeCompare(a[0]))
+    .map(([day,e])=>[day,e.open,e.consent,e.complete,e.paywall,e.sessions,e.success]);
+  table($("daily-table"),[
+    {label:"日期"},{label:"打开",num:true},{label:"同意",num:true},{label:"完成引导",num:true},
+    {label:"付费墙(人)",num:true},{label:"付费墙(次)",num:true},{label:"支付成功",num:true}
+  ],dailyRows);
 }
 
 function renderOnboarding(){
@@ -259,6 +285,7 @@ async function boot(){
     DATA = await response.json();
     const r = DATA.range||{};
     $("meta").innerHTML = `${r.from||""} ~ ${r.to||""}<br>数据更新：${String(DATA.generated_at||"").replace("T"," ").slice(0,16)} UTC`;
+    $("funnel-note").textContent = `统计区间 ${r.from||""} ~ ${r.to||""} · 人数按安装去重，同一用户多次操作只算 1 人`;
     show("overview");
   }catch(e){
     $("meta").textContent = "数据还没生成，请等 GitHub Action 跑完";
