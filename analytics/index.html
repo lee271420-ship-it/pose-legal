@@ -126,6 +126,7 @@ let DATA = null;
 
 function renderOverview(){
   const d = DATA.overview, map = new Map(d.funnel.map(r=>[r.stage,r.users]));
+  const downloads = d.downloads||0;
   const installs = d.installs||0, opens = map.get("app_open")||0, consent = map.get("consent_accept")||0;
   const complete = map.get("onboarding_complete")||0;
   const paywallUsers = map.get("paywall_open")||0;
@@ -133,16 +134,19 @@ function renderOverview(){
   const clicked = map.get("purchase_click")||0;
   const success = map.get("purchase_success")||0;
   $("overview-kpis").innerHTML =
-    kpi("安装",fmt(installs),"ASC 去重")+
-    kpi("首次打开",fmt(opens),installs?`打开率 ${pct(opens/installs)}`:"")+
+    kpi("App Store 下载",fmt(downloads),"含线上无埋点版本")+
+    kpi("有埋点打开",fmt(opens),downloads?`${pct(opens/downloads)} of 下载`:"")+
     kpi("同意协议",fmt(consent),opens?`${pct(consent/opens)} of 打开`:"")+
     kpi("完成引导",fmt(complete),consent?`${pct(complete/consent)} of 同意`:"")+
     kpi("付费墙打开",fmt(paywallUsers),`人数 · 人次 ${fmt(paywallSessions)}`)+
     kpi("支付成功",fmt(success),clicked?`${pct(success/clicked)} of 点击`:"");
-  const rows=[]; let prev=installs;
-  rows.push(["App Store 安装",installs,"—","100.0%","—"]);
+  const rows=[]; let prev=opens;
+  rows.push(["App Store 下载",downloads,"—","100.0%","—"]);
+  rows.push(["首次打开（有埋点）",opens,downloads?pct(opens/downloads):"—",downloads?pct(opens/downloads):"—",
+    downloads>opens?`−${fmt(downloads-opens)}`:"—"]);
   let last=0; STAGES.forEach((s,i)=>{ if((map.get(s[0])||0)>0) last=i; });
   STAGES.forEach((s,i)=>{
+    if(s[0]==="app_open") return;
     if(i>last+1) return;
     const users=map.get(s[0])||0, step=prev>0?users/prev:0, cum=installs>0?users/installs:0;
     rows.push([s[1],users,step?pct(step):"—",pct(cum),(prev-users)>0?`−${fmt(prev-users)}`:"—"]);
@@ -167,10 +171,11 @@ function renderOverview(){
     const e = row(r.day);
     e.sessions = r.opened;
   }
+  const downloadMap = new Map((((DATA.quality||{}).asc)||[]).map(r=>[r.day,r.downloads]));
   const dailyRows = [...dayMap.entries()].sort((a,b)=>b[0].localeCompare(a[0]))
-    .map(([day,e])=>[day,e.open,e.consent,e.complete,e.paywall,e.sessions,e.success]);
+    .map(([day,e])=>[day,downloadMap.get(day)||0,e.open,e.consent,e.complete,e.paywall,e.sessions,e.success]);
   table($("daily-table"),[
-    {label:"日期"},{label:"打开",num:true},{label:"同意",num:true},{label:"完成引导",num:true},
+    {label:"日期"},{label:"下载",num:true},{label:"打开",num:true},{label:"同意",num:true},{label:"完成引导",num:true},
     {label:"付费墙(人)",num:true},{label:"付费墙(次)",num:true},{label:"支付成功",num:true}
   ],dailyRows);
 }
@@ -285,7 +290,7 @@ async function boot(){
     DATA = await response.json();
     const r = DATA.range||{};
     $("meta").innerHTML = `${r.from||""} ~ ${r.to||""}<br>数据更新：${String(DATA.generated_at||"").replace("T"," ").slice(0,16)} UTC`;
-    $("funnel-note").textContent = `统计区间 ${r.from||""} ~ ${r.to||""} · 人数按安装去重，同一用户多次操作只算 1 人`;
+    $("funnel-note").textContent = `统计区间 ${r.from||""} ~ ${r.to||""} · 下载来自 App Store（聚合）；首次打开只统计带埋点的版本，线上 1.0.1 不上报 · 人数按安装去重`;
     show("overview");
   }catch(e){
     $("meta").textContent = "数据还没生成，请等 GitHub Action 跑完";
