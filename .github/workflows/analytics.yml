@@ -18,7 +18,7 @@ jobs:
         env:
           TOKEN: ${{ secrets.POSE_ANALYTICS_ADMIN_TOKEN }}
         run: |
-          FROM=$(date -u -d "30 days ago" +%F)
+          FROM=$(date -u -d "90 days ago" +%F)
           TO=$(date -u +%F)
           curl -fsS "https://analytics.movewithpose.com/api/snapshot?from=$FROM&to=$TO" \
             -H "x-admin-token: $TOKEN" -o analytics/data.json

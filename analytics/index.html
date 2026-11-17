@@ -34,6 +34,11 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .bar i{display:block;height:100%;background:var(--green)}
 .drop{color:var(--red)}
 .hidden{display:none}
+.filters{display:flex;gap:8px;align-items:center;margin-left:auto}
+.filters label{font-size:11px;color:var(--muted);display:flex;gap:4px;align-items:center}
+.filters input{border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12px;background:#fff}
+.filters button{border:0;border-radius:6px;padding:6px 12px;font-size:12px;background:var(--green);color:#fff;cursor:pointer}
+.meta{margin-left:0}
 .env-switch{display:flex;gap:6px}
 .env-switch button{border:1px solid var(--line);background:var(--white);color:var(--muted);border-radius:999px;padding:6px 14px;font-size:12px;cursor:pointer}
 .env-switch button.active{background:var(--pale);color:var(--ink);border-color:var(--pale);font-weight:600}
@@ -50,6 +55,11 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
     <button data-tab="ads">投放</button>
     <button data-tab="quality">数据质量</button>
   </nav>
+  <div class="filters">
+    <label>从 <input type="date" id="from" /></label>
+    <label>到 <input type="date" id="to" /></label>
+    <button id="apply">查询</button>
+  </div>
   <div class="meta" id="meta">加载中…</div>
 </header>
 <main>
@@ -113,98 +123,114 @@ const STAGES = [
 const fmt = v => (v===null||v===undefined)?"—":Number(v).toLocaleString("en-US");
 const pct = v => isFinite(v)?(v*100).toFixed(1)+"%":"—";
 const $ = id => document.getElementById(id);
+const kpi = (label,value,hint)=>`<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${hint||""}</div></div>`;
 
-function kpi(label,value,hint){return `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${hint||""}</div></div>`}
 function table(node,headers,rows){
   const head = headers.map(h=>`<th class="${h.num?"num":""}">${h.label}</th>`).join("");
-  const body = rows.length ? rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${typeof c==="number"?"num":""}">${typeof c==="number"?fmt(c):(c??"—")}</td>`).join("")}</tr>`).join("")
-    : `<tr><td colspan="${headers.length}" class="muted">暂无数据</td></tr>`;
+  const body = rows.length
+    ? rows.map(r=>`<tr>${r.map(c=>`<td class="${typeof c==="number"?"num":""}">${typeof c==="number"?fmt(c):(c??"—")}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${headers.length}" class="muted">该区间暂无数据</td></tr>`;
   node.innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
 }
 
 let DATA = null;
+let RANGE = { from:"", to:"" };
+const inRange = day => (!RANGE.from || day>=RANGE.from) && (!RANGE.to || day<=RANGE.to);
+
+function aggregate(){
+  const daily = DATA.daily||{};
+  const downloads = ((DATA.quality||{}).asc||[]).filter(r=>inRange(r.day)).reduce((s,r)=>s+(r.downloads||0),0);
+  const installs = (daily.installs||[]).filter(r=>inRange(r.day)).reduce((s,r)=>s+r.n,0);
+  const stages = {};
+  for(const r of daily.funnel||[]) if(inRange(r.day)) stages[r.milestone]=(stages[r.milestone]||0)+r.users;
+  const paywall = {opened:0,closed:0,clicked:0,succeeded:0};
+  for(const r of daily.paywall||[]) if(inRange(r.day)){
+    paywall.opened+=r.opened||0; paywall.closed+=r.closed||0;
+    paywall.clicked+=r.clicked||0; paywall.succeeded+=r.succeeded||0;
+  }
+  const orders = {units:0,revenue:0};
+  for(const r of (DATA.orders||{}).daily||[]) if(inRange(r.day)){
+    orders.units+=r.units||0; orders.revenue+=r.revenue||0;
+  }
+  return {downloads,installs,stages,paywall,orders};
+}
 
 function renderOverview(){
-  const d = DATA.overview, map = new Map(d.funnel.map(r=>[r.stage,r.users]));
-  const downloads = d.downloads||0;
-  const installs = d.installs||0, opens = map.get("app_open")||0, consent = map.get("consent_accept")||0;
-  const complete = map.get("onboarding_complete")||0;
-  const paywallUsers = map.get("paywall_open")||0;
-  const paywallSessions = (d.paywall&&d.paywall.opened)||0;
-  const clicked = map.get("purchase_click")||0;
-  const success = map.get("purchase_success")||0;
+  const a = aggregate();
+  const downloads = a.downloads, opens = a.stages.app_open||0, consent = a.stages.consent_accept||0;
+  const complete = a.stages.onboarding_complete||0;
+  const paywallUsers = a.stages.paywall_open||0;
+  const success = a.stages.purchase_success||0;
+  const clicked = a.stages.purchase_click||0;
+
   $("overview-kpis").innerHTML =
-    kpi("App Store 下载",fmt(downloads),"含线上无埋点版本")+
+    kpi("App Store 下载",fmt(downloads),"该区间下载")+
     kpi("有埋点打开",fmt(opens),downloads?`${pct(opens/downloads)} of 下载`:"")+
     kpi("同意协议",fmt(consent),opens?`${pct(consent/opens)} of 打开`:"")+
     kpi("完成引导",fmt(complete),consent?`${pct(complete/consent)} of 同意`:"")+
-    kpi("付费墙打开",fmt(paywallUsers),`人数 · 人次 ${fmt(paywallSessions)}`)+
+    kpi("付费墙打开",fmt(paywallUsers),`人数 · 人次 ${fmt(a.paywall.opened)}`)+
     kpi("支付成功",fmt(success),clicked?`${pct(success/clicked)} of 点击`:"");
+
   const rows=[]; let prev=opens;
   rows.push(["App Store 下载",downloads,"—","100.0%","—"]);
   rows.push(["首次打开（有埋点）",opens,downloads?pct(opens/downloads):"—",downloads?pct(opens/downloads):"—",
     downloads>opens?`−${fmt(downloads-opens)}`:"—"]);
-  let last=0; STAGES.forEach((s,i)=>{ if((map.get(s[0])||0)>0) last=i; });
+  let last=0; STAGES.forEach((s,i)=>{ if((a.stages[s[0]]||0)>0) last=i; });
   STAGES.forEach((s,i)=>{
     if(s[0]==="app_open") return;
     if(i>last+1) return;
-    const users=map.get(s[0])||0, step=prev>0?users/prev:0, cum=installs>0?users/installs:0;
+    const users=a.stages[s[0]]||0, step=prev>0?users/prev:0, cum=downloads>0?users/downloads:0;
     rows.push([s[1],users,step?pct(step):"—",pct(cum),(prev-users)>0?`−${fmt(prev-users)}`:"—"]);
     prev=users;
   });
   table($("funnel-table"),[{label:"步骤"},{label:"人数",num:true},{label:"步转化",num:true},{label:"累计",num:true},{label:"流失",num:true}],rows);
 
-  const dayMap = new Map();
-  const row = (day) => {
-    if (!dayMap.has(day)) dayMap.set(day, { open:0, consent:0, complete:0, paywall:0, success:0, sessions:0, orders:0 });
-    return dayMap.get(day);
-  };
-  for (const r of (DATA.daily&&DATA.daily.funnel)||[]) {
-    const e = row(r.day);
-    if (r.milestone==="app_open") e.open = r.users;
-    if (r.milestone==="consent_accept") e.consent = r.users;
-    if (r.milestone==="onboarding_complete") e.complete = r.users;
-    if (r.milestone==="paywall_open") e.paywall = r.users;
-    if (r.milestone==="purchase_success") e.success = r.users;
-  }
-  for (const r of (DATA.daily&&DATA.daily.paywall)||[]) {
-    const e = row(r.day);
-    e.sessions = r.opened;
-  }
   const downloadMap = new Map((((DATA.quality||{}).asc)||[]).map(r=>[r.day,r.downloads]));
-  const dailyRows = [...dayMap.entries()].sort((a,b)=>b[0].localeCompare(a[0]))
-    .map(([day,e])=>[day,downloadMap.get(day)||0,e.open,e.consent,e.complete,e.paywall,e.sessions,e.success]);
+  const dayMap = new Map((DATA.daily&&DATA.daily.installs||[]).map(r=>[r.day,r.n]));
+  const rowsDaily = [...dayMap.keys()].filter(inRange).sort((x,y)=>y.localeCompare(x)).map(day=>{
+    const st = {};
+    for(const r of (DATA.daily.funnel||[])) if(r.day===day) st[r.milestone]=r.users;
+    const pw = (DATA.daily.paywall||[]).find(r=>r.day===day)||{opened:0,closed:0,clicked:0,succeeded:0};
+    return [day,downloadMap.get(day)||0,dayMap.get(day)||0,st.consent_accept||0,st.onboarding_complete||0,st.paywall_open||0,pw.opened,pw.succeeded];
+  });
   table($("daily-table"),[
-    {label:"日期"},{label:"下载",num:true},{label:"打开",num:true},{label:"同意",num:true},{label:"完成引导",num:true},
-    {label:"付费墙(人)",num:true},{label:"付费墙(次)",num:true},{label:"支付成功",num:true}
-  ],dailyRows);
+    {label:"日期"},{label:"下载",num:true},{label:"打开",num:true},{label:"同意",num:true},
+    {label:"完成引导",num:true},{label:"付费墙(人)",num:true},{label:"付费墙(次)",num:true},{label:"支付成功",num:true}
+  ],rowsDaily);
 }
 
 function renderOnboarding(){
-  const d = DATA.onboarding;
-  const rows = d.steps.map((s,i)=>{
-    const prev = i===0?s.viewed:(d.steps[i-1].viewed||0);
-    return [s.step,s.viewed,s.completed,s.skipped,s.back,s.dwell?Math.round(s.dwell/1000)+"s":"—",prev?pct(s.viewed/prev):"—"];
-  });
-  table($("onboarding-table"),[{label:"步骤"},{label:"到达",num:true},{label:"完成",num:true},{label:"Skip",num:true},{label:"返回",num:true},{label:"平均停留",num:true},{label:"步转化",num:true}],rows);
+  const a = aggregate();
+  const rows = [];
+  let prev = a.stages.consent_accept||0;
+  for(const [key,label] of STAGES.filter(s=>/^q_|^welcome$|^demo$/.test(s[0]))){
+    const users = a.stages[key]||0;
+    const step = prev>0?users/prev:0;
+    rows.push([label,users,step?pct(step):"—"]);
+    prev = users || prev;
+  }
+  table($("onboarding-table"),[{label:"步骤"},{label:"到达",num:true},{label:"步转化",num:true}],rows);
+  $("answers").innerHTML = `<p class="muted">答案分布按整个快照区间统计：见下方。</p>`;
   const groups = new Map();
-  for(const a of d.answers||[]){ if(!groups.has(a.step)) groups.set(a.step,[]); groups.get(a.step).push(a); }
-  $("answers").innerHTML = [...groups].slice(0,8).map(([step,items])=>
-    `<div><b>${step}</b>${items.slice(0,6).map(x=>`<div class="muted" style="display:flex;justify-content:space-between"><span>${String(x.answer).slice(0,32)}</span><b>${x.n}</b></div>`).join("")}</div>`
-  ).join("") || `<p class="muted">暂无答案数据</p>`;
+  for(const x of (DATA.onboarding&&DATA.onboarding.answers)||[]){ if(!groups.has(x.step)) groups.set(x.step,[]); groups.get(x.step).push(x); }
+  for(const [step,items] of [...groups].slice(0,8)){
+    $("answers").innerHTML += `<div><b>${step}</b>${items.slice(0,6).map(x=>`<div class="muted" style="display:flex;justify-content:space-between"><span>${String(x.answer).slice(0,30)}</span><b>${x.n}</b></div>`).join("")}</div>`;
+  }
 }
 
 function renderPaywall(){
-  const d = DATA.paywall, t = d.totals||{};
+  const a = aggregate();
+  const p = a.paywall, users = a.stages.paywall_open||0;
   $("paywall-kpis").innerHTML =
-    kpi("打开",fmt(t.opened||0),"paywall_open")+
-    kpi("关闭",fmt(t.closed||0),t.opened?`关闭率 ${pct(t.closed/t.opened)}`:"")+
-    kpi("点击支付",fmt(t.clicked||0),t.opened?`点击率 ${pct(t.clicked/t.opened)}`:"")+
-    kpi("成功",fmt(t.succeeded||0),t.clicked?`完成率 ${pct(t.succeeded/t.clicked)}`:"")+
-    kpi("取消支付",fmt(t.cancelled||0),t.clicked?`${pct(t.cancelled/t.clicked)} of 点击`:"")+
-    kpi("端到端",t.opened?pct(t.succeeded/t.opened):"—","成功 / 打开");
+    kpi("打开人数",fmt(users),"去重")+
+    kpi("打开人次",fmt(p.opened),"含重复打开")+
+    kpi("关闭",fmt(p.closed),p.opened?`关闭率 ${pct(p.closed/p.opened)}`:"")+
+    kpi("点击支付",fmt(p.clicked),p.opened?`点击率 ${pct(p.clicked/p.opened)}`:"")+
+    kpi("成功",fmt(p.succeeded),p.clicked?`完成率 ${pct(p.succeeded/p.clicked)}`:"")+
+    kpi("端到端",p.opened?pct(p.succeeded/p.opened):"—","成功 / 打开人次");
   const group = (node,items)=>table(node,[{label:"分组"},{label:"打开",num:true},{label:"关闭",num:true},{label:"点击",num:true},{label:"成功",num:true},{label:"转化",num:true}],
     (items||[]).map(r=>[r.k,r.opened,r.closed,r.clicked,r.succeeded,r.opened?pct(r.succeeded/r.opened):"—"]));
+  const d = DATA.paywall||{};
   group($("paywall-source"),d.bySource);
   group($("paywall-close"),d.byCloseReason);
   group($("paywall-result"),d.byResult);
@@ -212,36 +238,26 @@ function renderPaywall(){
 }
 
 function renderRevenue(){
+  const a = aggregate();
   const d = DATA.revenue||{};
-  const o = DATA.orders||{};
-  const ot = o.totals||{};
   const st = new Map((d.statuses||[]).map(r=>[r.status,r.n]));
-  const sum = ty => ((d.totals||[]).find(x=>x.type===ty)||{}).n||0;
-  const units = ot.units||0, revenue = ot.revenue||0;
-
   $("revenue-kpis").innerHTML =
-    kpi("订单数",fmt(units),"App Store 生产")+
-    kpi("收入",revenue?revenue.toFixed(2):"0","按商店币种求和")+
-    kpi("客单价",units?(revenue/units).toFixed(2):"—","收入 / 订单")+
-    kpi("RC 购买",fmt(d.purchases||0),"RevenueCat 事件")+
-    kpi("活跃订阅",fmt((st.get("active")||0)+(st.get("trial")||0)),"当前状态")+
-    kpi("退款",fmt(st.get("refunded")||0),"");
-
+    kpi("订单数",fmt(a.orders.units),"App Store 生产")+
+    kpi("收入",a.orders.revenue?a.orders.revenue.toFixed(2):"0","按商店币种求和")+
+    kpi("客单价",a.orders.units?(a.orders.revenue/a.orders.units).toFixed(2):"—","收入 / 订单")+
+    kpi("活跃订阅",fmt((st.get("active")||0)+(st.get("trial")||0)),"RC 当前状态")+
+    kpi("退款",fmt(st.get("refunded")||0),"")+
+    kpi("试用中",fmt(st.get("trial")||0),"");
   table($("orders-table"),
     [{label:"日期"},{label:"产品"},{label:"国家"},{label:"数量",num:true},{label:"单价",num:true},{label:"小计",num:true},{label:"币种"}],
-    (o.rows||[]).map(r=>[r.day,r.product,r.country,r.units,
+    ((DATA.orders||{}).rows||[]).filter(r=>inRange(r.day)).map(r=>[r.day,r.product,r.country,r.units,
       r.customer_price?r.customer_price.toFixed(2):"—",
-      r.customer_price?(r.customer_price*r.units).toFixed(2):"—",
-      r.currency||"—"]));
-
+      r.customer_price?(r.customer_price*r.units).toFixed(2):"—",r.currency||"—"]));
   table($("orders-daily"),[{label:"日期"},{label:"订单",num:true},{label:"收入",num:true}],
-    (o.daily||[]).map(r=>[r.day,r.units,r.revenue?r.revenue.toFixed(2):"—"]));
-
+    ((DATA.orders||{}).daily||[]).filter(r=>inRange(r.day)).map(r=>[r.day,r.units,r.revenue?r.revenue.toFixed(2):"—"]));
   table($("revenue-status"),[{label:"状态"},{label:"人数",num:true}],(d.statuses||[]).map(r=>[r.status,r.n]));
-
   table($("revenue-types"),[{label:"类型"},{label:"次数",num:true},{label:"金额",num:true}],
     (d.totals||[]).map(r=>[r.type,r.n,r.amount?r.amount.toFixed(2):"—"]));
-
   table($("revenue-recent"),[{label:"时间"},{label:"类型"},{label:"产品"},{label:"周期"},{label:"价格"}],
     (d.recent||[]).slice(0,20).map(r=>[String(r.time).replace("T"," ").slice(0,19),r.type,r.product_id||"—",r.period_type||"—",r.price?`${r.price} ${r.currency||""}`:"—"]));
 }
@@ -251,7 +267,7 @@ function renderAds(){
   $("ads-kpis").innerHTML =
     kpi("花费",t.spend?t.spend.toFixed(2):"0","Apple Ads")+
     kpi("安装",fmt(t.installs||0),"")+
-    kpi("CPA",t.installs?(t.spend/t.installs).toFixed(2):"—","花费 / 安装")+
+    kpi("CPA",t.installs?(t.spend/t.installs).toFixed(2):"—","")+
     kpi("点击",fmt(t.taps||0),"")+
     kpi("点击→安装",t.taps?pct(t.installs/t.taps):"—","");
   const rows = items => (items||[]).map(r=>[r.campaign||r.keyword||"—",r.spend?r.spend.toFixed(2):"0",r.installs,r.installs?(r.spend/r.installs).toFixed(2):"—"]);
@@ -263,11 +279,8 @@ function renderQuality(){
   const d = DATA.quality||{};
   const asc = new Map((d.asc||[]).map(r=>[r.day,r.downloads]));
   const opens = new Map((d.opens||[]).map(r=>[r.day,r.n]));
-  table($("quality-daily"),[{label:"日期"},{label:"事件",num:true},{label:"人数",num:true},{label:"下载",num:true},{label:"打开",num:true},{label:"打开/下载",num:true}],
-    (d.daily||[]).map(r=>{
-      const down=asc.get(r.day)||0, open=opens.get(r.day)||0;
-      return [r.day,r.events,r.users,down||"—",open||"—",down&&open?pct(open/down):"—"];
-    }));
+  table($("quality-daily"),[{label:"日期"},{label:"事件",num:true},{label:"人数",num:true},{label:"下载",num:true},{label:"打开",num:true}],
+    (d.daily||[]).filter(r=>inRange(r.day)).map(r=>[r.day,r.events,r.users,asc.get(r.day)||"—",opens.get(r.day)||"—"]));
   table($("quality-versions"),[{label:"版本"},{label:"人数",num:true}],(d.versions||[]).map(r=>[r.k,r.n]));
   table($("quality-events"),[{label:"事件"},{label:"次数",num:true}],(d.topEvents||[]).map(r=>[r.k,r.n]));
 }
@@ -276,6 +289,8 @@ function show(tab){
   if(!DATA) return;
   for(const b of document.querySelectorAll("#tabs button")) b.classList.toggle("active",b.dataset.tab===tab);
   for(const p of document.querySelectorAll(".panel")) p.classList.toggle("hidden",p.id!=="panel-"+tab);
+  const meta = `统计区间 ${RANGE.from||"—"} ~ ${RANGE.to||"—"} · 快照更新：${String(DATA.generated_at||"").replace("T"," ").slice(0,16)} UTC`;
+  $("meta").textContent = meta;
   if(tab==="overview") renderOverview();
   if(tab==="onboarding") renderOnboarding();
   if(tab==="paywall") renderPaywall();
@@ -288,9 +303,11 @@ async function boot(){
   try{
     const response = await fetch("./data.json?t="+Date.now(),{cache:"no-store"});
     DATA = await response.json();
-    const r = DATA.range||{};
-    $("meta").innerHTML = `${r.from||""} ~ ${r.to||""}<br>数据更新：${String(DATA.generated_at||"").replace("T"," ").slice(0,16)} UTC`;
-    $("funnel-note").textContent = `统计区间 ${r.from||""} ~ ${r.to||""} · 下载来自 App Store（聚合）；首次打开只统计带埋点的版本，线上 1.0.1 不上报 · 人数按安装去重`;
+    RANGE.from = DATA.range?.from || "";
+    RANGE.to = DATA.range?.to || "";
+    $("from").value = RANGE.from;
+    $("to").value = RANGE.to;
+    $("funnel-note").textContent = "下载来自 App Store（聚合）；首次打开只统计带埋点的版本 · 人数按安装去重，跨天相加为“人日”";
     show("overview");
   }catch(e){
     $("meta").textContent = "数据还没生成，请等 GitHub Action 跑完";
@@ -299,6 +316,12 @@ async function boot(){
 
 document.getElementById("tabs").addEventListener("click",e=>{
   const b=e.target.closest("button[data-tab]"); if(b) show(b.dataset.tab);
+});
+document.getElementById("apply").addEventListener("click",()=>{
+  RANGE.from = $("from").value || "";
+  RANGE.to = $("to").value || "";
+  const active = document.querySelector("#tabs button.active");
+  show(active?active.dataset.tab:"overview");
 });
 boot();
 </script>
