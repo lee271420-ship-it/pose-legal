@@ -167,7 +167,7 @@ function renderOverview(){
     kpi("App Store 下载",fmt(downloads),"该区间下载")+
     kpi("有埋点打开",fmt(opens),downloads?`${pct(opens/downloads)} of 下载`:"")+
     kpi("同意协议",fmt(consent),opens?`${pct(consent/opens)} of 打开`:"")+
-    kpi("完成引导",fmt(complete),consent?`${pct(complete/consent)} of 同意`:"")+
+    kpi("完成引导",fmt(complete),consent>0?`${pct(complete/consent)} of 同意`:"同意事件缺失")+
     kpi("付费墙打开",fmt(paywallUsers),`人数 · 人次 ${fmt(a.paywall.opened)}`)+
     kpi("支付成功",fmt(success),clicked?`${pct(success/clicked)} of 点击`:"");
 
